@@ -105,13 +105,31 @@ class TESNet(nn.Module):
             self._initialize_weights()
 
     def conv_features(self, x):
-
+        """
+        This function takes an input tensor and applies a series of convolutional layers followed by
+        additional layers and returns the output tensor.
+        
+        :param x: x is the input tensor to the conv_features function. It is the image or batch of
+        images that will be passed through the convolutional layers of the neural network
+        :return: The output of the convolutional layers and the additional layers added on top of them
+        is being returned.
+        """
+        
         x = self.features(x)
         x = self.add_on_layers(x)
 
         return x
 
     def _cosine_convolution(self, x):
+        """
+        This function performs cosine convolution on the input tensor x with prototype vectors and
+        returns the distances.
+        
+        :param x: The input tensor to the cosine convolution function. It is normalized using L2
+        normalization before computing the cosine similarity with the prototype vectors
+        :return: the distances between the input tensor x and the prototype vectors using cosine
+        convolution.
+        """
 
         x = F.normalize(x,p=2,dim=1)
         now_prototype_vectors = F.normalize(self.prototype_vectors,p=2,dim=1)
@@ -119,13 +137,31 @@ class TESNet(nn.Module):
         distances = -distances
 
         return distances
+    
     def _project2basis(self,x):
+        """
+        This function projects input data onto a set of prototype vectors and returns the distances
+        between them. (used as similarity scores)
+        
+        :param x: The input tensor to the function `_project2basis`. It is likely a tensor representing
+        a batch of data points
+        :return: the distances between the input tensor x and the prototype vectors after normalizing
+        the prototype vectors using L2 normalization and projecting them onto x using convolution.
+        """
 
         now_prototype_vectors = F.normalize(self.prototype_vectors, p=2, dim=1)
         distances = F.conv2d(input=x, weight=now_prototype_vectors)
         return distances
 
     def prototype_distances(self, x):
+        """
+        The function calculates cosine distances and projected distances for convolutional features of
+        an input image.
+        
+        :param x: The input data to the neural network. It could be a batch of images or any other type
+        of data that the network is designed to process
+        :return: two values: `project_distances` and `cosine_distances`.
+        """
 
         conv_features = self.conv_features(x)
         cosine_distances = self._cosine_convolution(conv_features)
@@ -134,6 +170,20 @@ class TESNet(nn.Module):
         return project_distances,cosine_distances
 
     def distance_2_similarity(self, distances):
+        """
+        This function calculates similarity scores based on distances using either a logarithmic or
+        linear activation function.
+        
+        :param distances: Distances is a tensor containing the distances between a set of input samples
+        and the prototypes in a prototype-based model. The function distance_2_similarity takes these
+        distances as input and returns a tensor of similarities between the input samples and the
+        prototypes. The specific form of the similarity function depends on the prototype_activation
+        :return: a tensor of similarities computed from the input distances. The type of similarity
+        depends on the prototype_activation_function parameter. If it is set to 'log', the function
+        returns the logarithm of the ratio between the distance and the sum of the distance and a small
+        value epsilon. If it is set to 'linear', the function returns the negative of the distance. If
+        the prototype_activation_function is
+        """
 
         if self.prototype_activation_function == 'log':
             return torch.log((distances + 1) / (distances + self.epsilon))
@@ -152,6 +202,16 @@ class TESNet(nn.Module):
         return min_distances
 
     def global_max_pooling(self,distances):
+        """
+        This function performs global max pooling on a 2D tensor and returns a reshaped tensor.
+        
+        :param distances: The input tensor containing the distances between each input feature map and
+        each prototype in a prototype network
+        :return: a tensor of shape `(batch_size, num_prototypes)` which contains the maximum value of
+        each channel of the input tensor `distances` across all spatial locations. This is achieved by
+        applying 2D max pooling with a kernel size equal to the spatial dimensions of the input tensor,
+        followed by reshaping the resulting tensor to have `num_prototypes` columns.
+        """
 
         max_distances = F.max_pool2d(distances,
                                       kernel_size=(distances.size()[2],

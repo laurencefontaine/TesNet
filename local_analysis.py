@@ -20,9 +20,9 @@ from util.preprocess import mean, std, undo_preprocess_input_function
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-gpuid', nargs=1, type=str, default='0')
-parser.add_argument('-modeldir', nargs=1, type=str)
-parser.add_argument('-model', nargs=1, type=str)
+parser.add_argument('-gpuid', nargs=1, type=str, default='0,1')
+parser.add_argument('-modeldir', nargs=1, type=str, default='./models')
+parser.add_argument('-model', nargs=1, type=str, default='vgg')
 parser.add_argument('-imgdir', nargs=1, type=str)
 parser.add_argument('-img', nargs=1, type=str)
 parser.add_argument('-imgclass', nargs=1, type=int, default=-1)
@@ -33,10 +33,10 @@ os.environ['CUDA_VISIBLE_DEVICES'] = args.gpuid[0]
 
 # specify the test image to be analyzed
 
-
-image_dir = "./local_analysis/class29"
-image_name = "American_Crow_0001_25053.jpg"
-image_label =  28
+#001.Black_footed_Albatross/Black_Footed_Albatross_0032_796115.jpg
+image_dir = "./datasets/cub200_cropped/test_cropped/001.Black_footed_Albatross"
+image_name = "Black_Footed_Albatross_0032_796115.jpg"
+image_label =  0
 
 test_image_dir = image_dir
 test_image_name = image_name
@@ -47,13 +47,14 @@ test_image_path = os.path.join(test_image_dir, test_image_name)
 # load the model
 check_test_accu = False
 
-model_dir_list = []
-model_name_list = [ ]
+model_dir_list = ['./tesnet_output/CUB/vgg19/20230727-215946/', './tesnet_output/CUB/vgg19/20230727-215946/']
+model_name_list = ['10_19push0.7992.pth', '16nopush0.8005.pth', ]
 
 for model_dir,model_name in zip(model_dir_list,model_name_list):
 
     load_model_dir = model_dir
     load_model_name = model_name
+    #print(load_model_dir, load_model_name)
 
     #if load_model_dir[-1] == '/':
     #    model_base_architecture = load_model_dir.split('/')[-3]
@@ -63,15 +64,19 @@ for model_dir,model_name in zip(model_dir_list,model_name_list):
     #    experiment_run = load_model_dir.split('/')[-1]
 
 
-    model_base_architecture = load_model_dir.split('/')[-3]
-    experiment_run = load_model_dir.split('/')[-2]
+    model_base_architecture = load_model_dir.split('/')[-2]
+    experiment_run = load_model_dir.split('/')[-1]
+    #print(model_base_architecture, experiment_run)
 
-    save_analysis_path = os.path.join(test_image_dir, model_base_architecture,experiment_run, load_model_name)
+
+    save_analysis_path = os.path.join('./local_analysis/', model_base_architecture,experiment_run, load_model_name)
     makedir(save_analysis_path)
 
     log, logclose = create_logger(log_filename=os.path.join(save_analysis_path, 'local_analysis.log'))
 
     load_model_path = os.path.join(load_model_dir, load_model_name)
+    print(load_model_path)
+    print(re.search(r'\d+', load_model_name))
     epoch_number_str = re.search(r'\d+', load_model_name).group(0)
     start_epoch_number = int(epoch_number_str)
 

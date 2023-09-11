@@ -1,14 +1,19 @@
 import os
 import shutil
+import numpy as np
 
 import torch.utils.data
 # import torch.utils.data.distributed
-import torchvision.transforms as transforms
+import torchvision.transforms as T
 import torchvision.datasets as datasets
 
 import argparse
 import re
 
+import loader
+import loader_bacs
+
+from dlutils.sampler import MultipleSampler
 from util.helpers import makedir
 import push, model, train_and_test as tnt
 from util import save
@@ -16,27 +21,29 @@ from util.log import create_logger
 from util.preprocess import mean, std, preprocess_input_function
 
 import settings_CUB
+import settings_emma
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-gpuid',type=str, default='0')
+parser.add_argument('-gpuid',type=str, default='0,1,2,3')
 parser.add_argument('-arch',type=str, default='vgg19')
 
 parser.add_argument('-dataset',type=str,default="CUB")
-parser.add_argument('-times',type=str,default="test",help="experiment_run")
+#parser.add_argument('-times',type=str,default="test",help="experiment_run")
 
 args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpuid
 print(os.environ['CUDA_VISIBLE_DEVICES'])
 
-
+print('GPUs : ', torch.cuda.device_count())
 #setting parameter
-experiment_run = args.times
+#experiment_run = args.times
+experiment_run = settings_CUB.experiment_run
 base_architecture = args.arch
 dataset_name = args.dataset
 
 base_architecture_type = re.match('^[a-z]*', base_architecture).group(0)
 #model save dir
-model_dir = './saved_models/' + dataset_name+'/' + base_architecture + '/' + args.times + '/'
+model_dir = './tesnet_output/' + dataset_name+'/' + base_architecture + '/' + experiment_run + '/'
 
 if os.path.exists(model_dir) is True:
     shutil.rmtree(model_dir)
@@ -61,8 +68,9 @@ proto_bound_boxes_filename_prefix = 'bb'
 # load the hyper param
 if dataset_name == "CUB":
     #model param
+    image_dir = settings_CUB.data_path
     num_classes = settings_CUB.num_classes
-    img_size = settings_CUB.img_size
+    img_size = int(settings_CUB.img_size)
     add_on_layers_type = settings_CUB.add_on_layers_type
     prototype_shape = settings_CUB.prototype_shape
     prototype_activation_function = settings_CUB.prototype_activation_function
@@ -85,54 +93,126 @@ if dataset_name == "CUB":
     num_train_epochs = settings_CUB.num_train_epochs
     num_warm_epochs = settings_CUB.num_warm_epochs
     push_start = settings_CUB.push_start
-    push_epochs = settings_CUB.push_epochs
+    push_epochs = settings_CUB.pushchs
+    np.random_seed(17)
+    normalize = T.Normalize(mean=mean,std=std)
+    resize = T.Resize(size=(img_size, img_size))
+    h_flip = T.RandomHorizontalFlip(p=0.5)
+    # rotation = T.RandomRotation(10)
+    # affine = T.RandomAffine(degrees=15, shear=10)
+
+    train_t = T.Compose([h_flip, resize, T.ToTensor(), normalize])
+    # all datasets
+    # train set
+    train_dataset = loader.CroppedDataset(image_dir, sub_data='train', transform=train_t, push=False) #my loader
+    print('dataset : ', len(train_dataset))
+    # train_dataset = datasets.ImageFolder(
+    #     train_dir,
+    #     T.Compose([
+    #         T.Resize(size=(img_size, img_size)),
+    #         T.ToTensor(),
+    #         normalize,
+    #     ]))
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=train_batch_size, sampler=MultipleSampler(train_dataset, 10, 12), shuffle=False,
+        num_workers=4, pin_memory=False)
+    print('loader : ', len(train_loader))
+    # push set
+    train_push_dataset = loader.CroppedDataset(image_dir, sub_data='train', transform=T.Compose([resize, T.ToTensor()]), push=True)  #my loader
+    # train_push_dataset = datasets.ImageFolder(
+    #     train_push_dir,
+    #     T.Compose([
+    #         T.Resize(size=(img_size, img_size)),
+    #         T.ToTensor(),
+    #     ]))
+    train_push_loader = torch.utils.data.DataLoader(
+        train_push_dataset, batch_size=train_push_batch_size, shuffle=False,
+        num_workers=4, pin_memory=False)
+    # test set
+    test_dataset = loader.CroppedDataset(image_dir, sub_data='valid', transform=T.Compose([resize, T.ToTensor(), normalize]), push=False)  #my loader
+    # test_dataset = datasets.ImageFolder(
+    #     test_dir,
+    #     T.Compose([
+    #         T.Resize(size=(img_size, img_size)),
+    #         T.ToTensor(),
+    #         normalize,
+    #     ]))
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=test_batch_size, shuffle=False,
+        num_workers=4, pin_memory=False)
+
+elif dataset_name == 'emma':
+    mean_emma = (1229.04, 5304.82,  1708.66)
+    std_emma = (206.16,  672.06, 1454.22)
+    #model param
+    print('emma')
+    num_classes = settings_emma.num_classes
+    img_size = settings_emma.img_size
+    add_on_layers_type = settings_emma.add_on_layers_type
+    prototype_shape = settings_emma.prototype_shape
+    prototype_activation_function = settings_emma.prototype_activation_function
+    #datasets
+    image_dir = settings_emma.data_path
+    # train_dir = settings_CUB.train_dir
+    # test_dir = settings_CUB.test_dir
+    # train_push_dir = settings_CUB.train_push_dir
+    train_batch_size = settings_emma.train_batch_size
+    test_batch_size = settings_emma.test_batch_size
+    train_push_batch_size = settings_emma.train_push_batch_size
+    #optimzer
+    joint_optimizer_lrs = settings_emma.joint_optimizer_lrs
+    joint_lr_step_size = settings_emma.joint_lr_step_size
+    warm_optimizer_lrs = settings_emma.warm_optimizer_lrs
+
+    last_layer_optimizer_lr = settings_emma.last_layer_optimizer_lr
+    # weighting of different training losses
+    coefs = settings_emma.coefs
+    # number of training epochs, number of warm epochs, push start epoch, push epochs
+    num_train_epochs = settings_emma.num_train_epochs
+    num_warm_epochs = settings_emma.num_warm_epochs
+    push_start = settings_emma.push_start
+    push_epochs = settings_emma.push_epochs
+
+    training_files, validation_files, test_files = loader_bacs.split_files('./datasets/EmmaOMDisruptors20230420_tif/')
+
+    t_augment = T.Compose([T.RandomHorizontalFlip(p=0.5),T.RandomVerticalFlip(p=0.5), T.Normalize(mean=mean_emma,std=std_emma)])
+
+    #load train data
+    train_dataset = loader_bacs.EmmaDataset(training_files, transform=t_augment)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=train_batch_size, shuffle=True,
+        num_workers=4, pin_memory=False)
+    #load train push data
+    train_push_dataset = loader_bacs.EmmaDataset(training_files)
+    train_push_loader = torch.utils.data.DataLoader(
+        train_push_dataset, batch_size=train_push_batch_size, shuffle=False,
+        num_workers=4, pin_memory=False)
+    #load test data
+    validation_data = loader_bacs.EmmaDataset(validation_files, transform=T.Compose([T.Normalize(mean=mean_emma, std=std_emma)]))
+    test_loader = torch.utils.data.DataLoader(
+        validation_data, batch_size=test_batch_size, shuffle=False,
+        num_workers=4, pin_memory=False)
+
+
+    
+
 
 else:
     raise Exception("there are no settings file of datasets {}".format(dataset_name))
 
-log(train_dir)
+log(experiment_run)
 
-normalize = transforms.Normalize(mean=mean,std=std)
 
-# all datasets
-# train set
-train_dataset = datasets.ImageFolder(
-    train_dir,
-    transforms.Compose([
-        transforms.Resize(size=(img_size, img_size)),
-        transforms.ToTensor(),
-        normalize,
-    ]))
-train_loader = torch.utils.data.DataLoader(
-    train_dataset, batch_size=train_batch_size, shuffle=True,
-    num_workers=4, pin_memory=False)
-# push set
-train_push_dataset = datasets.ImageFolder(
-    train_push_dir,
-    transforms.Compose([
-        transforms.Resize(size=(img_size, img_size)),
-        transforms.ToTensor(),
-    ]))
-train_push_loader = torch.utils.data.DataLoader(
-    train_push_dataset, batch_size=train_push_batch_size, shuffle=False,
-    num_workers=4, pin_memory=False)
-# test set
-test_dataset = datasets.ImageFolder(
-    test_dir,
-    transforms.Compose([
-        transforms.Resize(size=(img_size, img_size)),
-        transforms.ToTensor(),
-        normalize,
-    ]))
-test_loader = torch.utils.data.DataLoader(
-    test_dataset, batch_size=test_batch_size, shuffle=False,
-    num_workers=4, pin_memory=False)
 
 # we should look into distributed sampler more carefully at torch.utils.data.distributed.DistributedSampler(train_dataset)
 log('training set size: {0}'.format(len(train_loader.dataset)))
 log('push set size: {0}'.format(len(train_push_loader.dataset)))
 log('test set size: {0}'.format(len(test_loader.dataset)))
 log('batch size: {0}'.format(train_batch_size))
+log('savefolder: {0}'.format(experiment_run))
+
+print('train batches: ', len(train_loader))
+print('test batches: ', len(test_loader))
 
 log("backbone architecture:{}".format(base_architecture))
 log("basis concept size:{}".format(prototype_shape))
